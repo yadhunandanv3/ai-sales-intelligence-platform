@@ -15,6 +15,8 @@ A production-quality SaaS platform featuring multi-tenancy, granular Role-Based 
   * Lead summary compiler analyzing all customer touchpoints.
   * Adaptive outreach template generator.
   * Controlled natural language sales assistant using a tool-calling layer.
+* **Modern UI:** Visual Kanban Board and AI Assistant Chat interface.
+* **Containerized Deployment:** Multi-container docker-compose setup.
 
 ---
 
@@ -25,24 +27,28 @@ A production-quality SaaS platform featuring multi-tenancy, granular Role-Based 
 * **ORM:** Prisma
 * **Caching & Queues:** Redis, BullMQ
 * **Validation:** Zod
-* **Structured Logging:** Pino, Pino-Pretty
 * **Testing:** Vitest, Supertest
+* **Frontend:** React, Vite, Tailwind CSS, React Router
+* **Reverse Proxy:** Nginx (static bundle delivery)
 * **Containerization:** Docker, Docker Compose
 
 ---
 
 ## 📂 Project Structure
 
-```
-src/
-├── app.js               # Express application config & routing bootstrap
-├── server.js            # Node service entry point & graceful shutdown
-├── config/              # Server config and Zod environment validation
-├── database/            # Prisma Client init and query tracing
-├── middleware/          # Security, auth, tenant resolution, logs, errors
-├── common/              # System custom errors and helpers
-├── integrations/        # Redis, AI provider services, third-party hooks
-└── modules/             # Encapsulated feature domains (leads, auth, etc.)
+```text
+D:/Projects AI/
+├── backend/               # Backend Express API & Worker codebase
+│   ├── prisma/            # Database schema & migrations
+│   ├── src/               # Express routing, middleware, controllers, services
+│   ├── tests/             # Automated integration tests
+│   └── Dockerfile         # Node.js production image
+├── frontend/              # Frontend React client SPA
+│   ├── src/               # UI components, routing, services
+│   ├── nginx.conf         # Nginx proxy-pass configurations
+│   └── Dockerfile         # Multi-stage production container
+├── docker-compose.yml     # Orchestration stack configuring all services
+└── README.md
 ```
 
 ---
@@ -51,46 +57,71 @@ src/
 
 ### Prerequisites
 * Node.js (v18+)
-* Docker & Docker Compose
+* Docker & Docker Desktop
 
-### Steps
-1. **Clone the Repository:**
+---
+
+### Option A: The Full Containerized Setup (Recommended)
+This runs the entire stack inside Docker containers, matching the production environment.
+
+1. **Start the Containers:**
+   Ensure Docker Desktop is open and running, then execute in the root directory:
    ```bash
-   git clone <repo-url>
-   cd ai-sales-intelligence-platform
+   docker-compose up --build -d
    ```
 
-2. **Environment Configuration:**
-   Copy the example environment file:
+2. **Run Migrations & Seed Data:**
+   Initialize your database tables and seed default roles/permissions:
    ```bash
+   docker exec -it sales_intel_backend npx prisma migrate deploy
+   docker exec -it sales_intel_backend node prisma/seed.js
+   ```
+
+3. **Access the Application:**
+   * **Frontend Web Interface:** [http://localhost:8080](http://localhost:8080)
+   * **Backend API Gateway:** [http://localhost:3000](http://localhost:3000)
+
+---
+
+### Option B: Local Hybrid Development Setup
+This runs PostgreSQL and Redis inside Docker, but executes the Express API, workers, and React dev compiler directly on your machine.
+
+1. **Start Databases:**
+   ```bash
+   docker-compose up -d sales_intel_postgres sales_intel_redis
+   ```
+
+2. **Setup and Start Backend:**
+   ```bash
+   cd backend
    cp .env.example .env
-   ```
-   Modify `.env` to match your local setup.
-
-3. **Start Containers:**
-   Ensure Docker is running, then launch PostgreSQL and Redis:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Install Dependencies:**
-   ```bash
    npm install
-   ```
-
-5. **Run Migrations & Seed Data:**
-   Initialize tables and populate default Roles and Permissions:
-   ```bash
    npx prisma migrate dev
    node prisma/seed.js
-   ```
-
-6. **Run Server:**
-   ```bash
    npm run dev
    ```
 
-7. **Run Tests:**
+3. **Start Background Queue Worker (Separate Terminal):**
    ```bash
-   npm run test
+   cd backend
+   node src/workers/system.worker.js
    ```
+
+4. **Setup and Start Frontend (Separate Terminal):**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   * Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+---
+
+## 🧪 Running Tests
+
+All backend modules are validated using Vitest. Run the test suite:
+
+```bash
+cd backend
+npm run test
+```
