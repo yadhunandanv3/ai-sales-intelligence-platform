@@ -23,7 +23,7 @@ services:
 
   sales_intel_backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: sales_intel_backend
     restart: always
@@ -45,7 +45,7 @@ services:
 
   sales_intel_worker:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: sales_intel_worker
     restart: always
