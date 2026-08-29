@@ -1,0 +1,82 @@
+services:
+  sales_intel_postgres:
+    image: postgres:15-alpine
+    container_name: sales_intel_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secure_pass
+      POSTGRES_DB: sales_intel_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  sales_intel_redis:
+    image: redis:7-alpine
+    container_name: sales_intel_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  sales_intel_backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sales_intel_backend
+    restart: always
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres_secure_pass@sales_intel_postgres:5432/sales_intel_db?schema=public
+      REDIS_URL: redis://sales_intel_redis:6379
+      JWT_SECRET: super_secure_development_jwt_secret_value
+      JWT_REFRESH_SECRET: super_secure_development_jwt_refresh_secret_value
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      OPENAI_API_KEY: mock-openai-key-for-development
+    ports:
+      - "3000:3000"
+    depends_on:
+      - sales_intel_postgres
+      - sales_intel_redis
+
+  sales_intel_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sales_intel_worker
+    restart: always
+    command: node src/workers/system.worker.js
+    environment:
+      PORT: 3001
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:postgres_secure_pass@sales_intel_postgres:5432/sales_intel_db?schema=public
+      REDIS_URL: redis://sales_intel_redis:6379
+      JWT_SECRET: super_secure_development_jwt_secret_value
+      JWT_REFRESH_SECRET: super_secure_development_jwt_refresh_secret_value
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_EXPIRATION: 7d
+      OPENAI_API_KEY: mock-openai-key-for-development
+    depends_on:
+      - sales_intel_postgres
+      - sales_intel_redis
+
+  sales_intel_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sales_intel_frontend
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - sales_intel_backend
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

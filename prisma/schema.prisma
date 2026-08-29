@@ -1,0 +1,293 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Multi-tenant Org
+model Organization {
+  id          String               @id @default(uuid())
+  name        String
+  subdomain   String               @unique
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  members     OrganizationMember[]
+  leads       Lead[]
+  pipelines   Pipeline[]
+  activities  Activity[]
+  tasks       Task[]
+  notes       Note[]
+  notifications Notification[]
+  auditLogs   AuditLog[]
+  aiInteractions AIInteraction[]
+  integrations Integration[]
+
+  @@index([subdomain])
+}
+
+// User Profile
+model User {
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  passwordHash        String
+  firstName           String?
+  lastName            String?
+  isVerified          Boolean              @default(false)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  deletedAt           DateTime?            // Soft deletion
+  memberships         OrganizationMember[]
+  assignedLeads       Lead[]               @relation("AssignedLeads")
+  assignedTasks       Task[]               @relation("AssignedTasks")
+  notes               Note[]
+  activities          Activity[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  aiInteractions      AIInteraction[]
+
+  @@index([email])
+}
+
+// RBAC Permissions
+model Permission {
+  id          String           @id @default(uuid())
+  name        String           @unique // e.g. "lead:create"
+  description String?
+  roles       RolePermission[]
+}
+
+// RBAC Roles
+model Role {
+  id          String               @id @default(uuid())
+  name        String               @unique // e.g. "SUPER_ADMIN", "ORG_ADMIN", "SALES_MANAGER", "SALES_REP"
+  description String?
+  members     OrganizationMember[]
+  permissions RolePermission[]
+}
+
+// RBAC Role-Permission Join
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// Organization Membership linking User + Tenant + Role
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  roleId         String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// Lead Profile
+model Lead {
+  id              String           @id @default(uuid())
+  organizationId  String
+  assignedUserId  String?
+  pipelineStageId String?
+  name            String
+  email           String?
+  phone           String?
+  company         String?
+  jobTitle        String?
+  source          String?          // e.g. "Web", "Referral", "Cold Call"
+  status          String           @default("NEW") // e.g. "NEW", "CONTACTED", "QUALIFIED", "LOST", "WON"
+  value           Decimal?         @db.Decimal(12, 2)
+  score           Int              @default(0)     // AI/Deterministic Lead Score
+  tags            String[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?        // Soft deletion
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignedUser    User?            @relation("AssignedLeads", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  pipelineStage   PipelineStage?   @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
+  activities      Activity[]
+  tasks           Task[]
+  notes           Note[]
+  aiInteractions  AIInteraction[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, pipelineStageId])
+  @@index([organizationId, assignedUserId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, deletedAt])
+}
+
+// Sales Pipeline Configuration per Org
+model Pipeline {
+  id             String          @id @default(uuid())
+  organizationId String
+  name           String
+  isDefault      Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages         PipelineStage[]
+
+  @@index([organizationId])
+}
+
+// Sales Pipeline Stage
+model PipelineStage {
+  id         String   @id @default(uuid())
+  pipelineId String
+  name       String
+  position   Int      // Ordering position in UI: 0, 1, 2, ...
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  leads      Lead[]
+
+  @@index([pipelineId])
+}
+
+// Activity Event Log for Leads
+model Activity {
+  id             String       @id @default(uuid())
+  organizationId String
+  leadId         String
+  userId         String?
+  type           String       // e.g. "CALL", "EMAIL", "MEETING", "NOTE", "STATUS_CHANGE", "ASSIGNMENT"
+  content        Json         // Details of the activity
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, leadId, createdAt])
+}
+
+// Tasks associated with Leads
+model Task {
+  id             String       @id @default(uuid())
+  organizationId String
+  leadId         String
+  assignedUserId String?
+  title          String
+  description    String?
+  dueDate        DateTime?
+  priority       String       @default("MEDIUM") // LOW, MEDIUM, HIGH
+  status         String       @default("TODO")   // TODO, IN_PROGRESS, COMPLETED
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedUser   User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, leadId])
+  @@index([organizationId, assignedUserId, status])
+  @@index([organizationId, dueDate])
+  @@index([organizationId, deletedAt])
+}
+
+// Rich Text Notes for Leads
+model Note {
+  id             String       @id @default(uuid())
+  organizationId String
+  leadId         String
+  userId         String?
+  content        String       @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lead           Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, leadId, createdAt])
+}
+
+// Realtime & Background Notifications
+model Notification {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  title          String
+  message        String
+  type           String       // e.g. "LEAD_ASSIGNED", "TASK_DUE", "AI_INSIGHT"
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId, isRead, createdAt])
+}
+
+// Sensitive Security Audit Logs
+model AuditLog {
+  id             String       @id @default(uuid())
+  organizationId String?      // Nullable for system-level actions (e.g. login failures)
+  userId         String?
+  action         String       // e.g. "USER_LOGIN", "LEAD_CREATED", "LEAD_DELETED"
+  targetTable    String?
+  targetId       String?
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// AI Summaries, Scores, Follow-ups
+model AIInteraction {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  leadId         String?
+  prompt         String       @db.Text
+  response       Json         // Structured prompt responses/calls
+  tokensUsed     Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead           Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([leadId])
+}
+
+// Integration configuration (like SMTP, Slack, etc.)
+model Integration {
+  id             String       @id @default(uuid())
+  organizationId String
+  provider       String       // e.g. "SLACK", "SENDGRID"
+  config         Json         // Encrypted or sensitive connection config details
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+}
