@@ -4,6 +4,7 @@ import { verifyDatabaseConnection, prisma } from './database/client.js';
 import { verifyRedisConnection } from './integrations/redis.js';
 import { logger } from './middleware/logger.js';
 import redisClient from './integrations/redis.js';
+import './workers/system.worker.js';
 
 const startServer = async () => {
   try {
