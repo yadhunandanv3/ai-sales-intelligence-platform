@@ -96,9 +96,15 @@ export default function Assistant() {
                   </span>
                   {msg.logs.map((log, lIdx) => (
                     <div key={lIdx} className="bg-gray-50 rounded border border-gray-200 p-2 text-xs font-mono text-gray-600">
-                      <div>Action: <span className="font-bold text-gray-800">{log.action}</span></div>
-                      {log.leadId && <div>Lead ID: <span className="text-[10px]">{log.leadId}</span></div>}
-                      {log.taskId && <div>Task ID: <span className="text-[10px]">{log.taskId}</span></div>}
+                      {typeof log === 'string' ? (
+                        <div>{log}</div>
+                      ) : (
+                        <>
+                          <div>Action: <span className="font-bold text-gray-800">{log.action || 'CRM Mutation'}</span></div>
+                          {log.leadId && <div>Lead ID: <span className="text-[10px]">{log.leadId}</span></div>}
+                          {log.taskId && <div>Task ID: <span className="text-[10px]">{log.taskId}</span></div>}
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
