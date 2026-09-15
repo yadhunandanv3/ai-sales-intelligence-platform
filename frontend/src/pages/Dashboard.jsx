@@ -8,6 +8,13 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [selectedLead, setSelectedLead] = useState(null);
   
+  // View mode and pagination
+  const [viewMode, setViewMode] = useState('kanban'); // 'kanban' | 'table'
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 10, totalPages: 1 });
+  const [statusFilter, setStatusFilter] = useState('');
+  
   // Modals / AI states
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createData, setCreateData] = useState({ name: '', company: '', value: 0 });
@@ -20,8 +27,15 @@ export default function Dashboard() {
   const fetchLeads = async () => {
     setLoading(true);
     try {
-      const res = await api.getLeads({ search, limit: 100 });
-      setLeads(res.data || []);
+      if (viewMode === 'kanban') {
+        const res = await api.getLeads({ search, status: statusFilter, limit: 100 });
+        setLeads(res.data || []);
+        if (res.pagination) setPagination(res.pagination);
+      } else {
+        const res = await api.getLeads({ search, status: statusFilter, page, limit });
+        setLeads(res.data || []);
+        if (res.pagination) setPagination(res.pagination);
+      }
     } catch (err) {
       setError(err.message || 'Failed to load leads.');
     } finally {
@@ -31,7 +45,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchLeads();
-  }, [search]);
+  }, [search, statusFilter, page, limit, viewMode]);
 
   const handleCreateLead = async (e) => {
     e.preventDefault();
@@ -118,31 +132,76 @@ export default function Dashboard() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Filters Header */}
-      <div className="mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <div className="w-full sm:max-w-xs">
-          <input
-            type="text"
-            placeholder="Search leads..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          />
+      {/* Filters & View Toggle Header */}
+      <div className="mb-6 flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Search Input */}
+          <div className="w-full sm:w-64">
+            <input
+              type="text"
+              placeholder="Search by name, company..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              className="w-full px-3 py-1.5 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Stage Filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-1.5 border border-gray-300 rounded-md text-sm bg-white text-gray-700 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="">All Stages ({pagination.total})</option>
+            {stages.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          {/* View Mode Toggle */}
+          <div className="inline-flex rounded-md shadow-sm border border-gray-300 overflow-hidden">
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`px-3 py-1.5 text-xs font-semibold ${
+                viewMode === 'kanban' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              📊 Kanban Board
+            </button>
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 py-1.5 text-xs font-semibold border-l border-gray-300 ${
+                viewMode === 'table' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              📋 Table View (Paginated)
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium shadow-sm transition"
-        >
-          Add New Lead
-        </button>
+
+        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium shadow-sm transition"
+          >
+            + Add New Lead
+          </button>
+        </div>
       </div>
 
-      {/* Kanban Board */}
+      {/* Main Content Area */}
       {loading ? (
-        <div className="flex-1 flex justify-center items-center">
-          <p className="text-gray-500">Loading pipelines...</p>
+        <div className="flex-1 flex justify-center items-center py-20">
+          <p className="text-gray-500 text-sm">Loading leads data...</p>
         </div>
-      ) : (
+      ) : viewMode === 'kanban' ? (
+        /* Kanban Board View */
         <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
           {stages.map((stage) => {
             const stageLeads = leads.filter((l) => l.status === stage);
@@ -189,6 +248,151 @@ export default function Dashboard() {
               </div>
             );
           })}
+        </div>
+      ) : (
+        /* Paginated Table View */
+        <div className="flex-1 flex flex-col bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+          <div className="flex-1 overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prospect / Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stage</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deal Value</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">AI Score</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {leads.map((lead) => (
+                  <tr
+                    key={lead.id}
+                    onClick={() => {
+                      setSelectedLead(lead);
+                      setSummary(null);
+                      setFollowUp(null);
+                    }}
+                    className="hover:bg-indigo-50/50 cursor-pointer transition"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-semibold text-gray-900">{lead.name}</div>
+                      <div className="text-xs text-gray-500">{lead.jobTitle || lead.email || 'No title'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900 font-medium">{lead.company || '—'}</div>
+                      <div className="text-xs text-gray-500">{lead.source || 'Web'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+                        lead.status === 'WON' ? 'bg-green-100 text-green-800' :
+                        lead.status === 'QUALIFIED' ? 'bg-blue-100 text-blue-800' :
+                        lead.status === 'CONTACTED' ? 'bg-purple-100 text-purple-800' :
+                        lead.status === 'NEW' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {lead.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
+                      ${parseFloat(lead.value || 0).toLocaleString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${getScoreColor(lead.score)}`}>
+                        ★ {lead.score}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
+                      {new Date(lead.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-xs font-medium">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedLead(lead);
+                          setSummary(null);
+                          setFollowUp(null);
+                        }}
+                        className="text-indigo-600 hover:text-indigo-900 font-semibold"
+                      >
+                        Inspect & AI →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {leads.length === 0 && (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-10 text-center text-sm text-gray-500">
+                      No leads found matching your criteria.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Controls Bar */}
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="flex items-center gap-3 text-xs text-gray-600">
+              <span>
+                Showing <span className="font-bold">{pagination.total > 0 ? (page - 1) * limit + 1 : 0}</span> to{' '}
+                <span className="font-bold">{Math.min(page * limit, pagination.total)}</span> of{' '}
+                <span className="font-bold">{pagination.total}</span> leads
+              </span>
+              <div className="flex items-center gap-1">
+                <span>Per page:</span>
+                <select
+                  value={limit}
+                  onChange={(e) => {
+                    setLimit(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="border border-gray-300 rounded px-2 py-0.5 text-xs bg-white text-gray-700"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                ← Previous
+              </button>
+              
+              {/* Numeric Page Buttons */}
+              <div className="flex items-center gap-1">
+                {Array.from({ length: pagination.totalPages || 1 }, (_, i) => i + 1).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold ${
+                      page === p
+                        ? 'bg-indigo-600 text-white'
+                        : 'border border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                disabled={page >= (pagination.totalPages || 1)}
+                className="px-3 py-1 border border-gray-300 rounded-md text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
