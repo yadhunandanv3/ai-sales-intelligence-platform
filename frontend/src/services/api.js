@@ -64,7 +64,12 @@ class ApiService {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error?.message || `HTTP error! status: ${response.status}`);
+        let errorMessage = errData.error?.message || `HTTP error! status: ${response.status}`;
+        if (errData.error?.details && Array.isArray(errData.error.details) && errData.error.details.length > 0) {
+          const detailMsgs = errData.error.details.map(d => d.message || `${d.field}: invalid`).join('. ');
+          if (detailMsgs) errorMessage = detailMsgs;
+        }
+        throw new Error(errorMessage);
       }
 
       return await response.json();
