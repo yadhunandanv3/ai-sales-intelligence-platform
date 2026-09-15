@@ -103,10 +103,10 @@ export class AIAssistantService {
       const lowerMessage = message.toLowerCase();
 
       // Scenario 1: User requests Lead Creation
-      if (lowerMessage.includes('create lead') || lowerMessage.includes('add lead')) {
+      if (/create\s+(?:a\s+)?lead|add\s+(?:a\s+)?lead|new\s+lead/i.test(message)) {
         // Extract name
         let name = 'New AI Prospect';
-        const nameMatch = message.match(/named\s+([A-Za-z\s]+?)(?:\s+from|\s+value|\s+email|\s+and|$)/i);
+        const nameMatch = message.match(/(?:named|for)\s+([A-Za-z\s]+?)(?:\s+from|\s+value|\s+email|\s+and|$)/i);
         if (nameMatch) name = nameMatch[1].trim();
 
         // Extract company
@@ -126,23 +126,35 @@ export class AIAssistantService {
       }
 
       // Scenario 2: User requests Task Creation
-      if (lowerMessage.includes('create task') || lowerMessage.includes('add task') || lowerMessage.includes('schedule task')) {
+      if (/create\s+(?:a\s+)?task|add\s+(?:a\s+)?task|schedule\s+(?:a\s+)?task/i.test(message)) {
         // Determine Lead ID (either the newly created one, or search for a lead UUID in the prompt)
         let targetLeadId = currentLeadId;
         const uuidMatch = message.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
         if (uuidMatch) targetLeadId = uuidMatch[0];
 
         if (!targetLeadId) {
-          // If no lead exists, find the first active lead in this organization to attach the task to
+          // If no lead UUID exists, try to find a lead by name mentioned in prompt
+          const nameMatch = message.match(/(?:for|under|to)\s+([A-Za-z\s]+?)(?:\s+and|$)/i);
+          if (nameMatch) {
+            const matchedLead = await prisma.lead.findFirst({
+              where: { organizationId, name: { contains: nameMatch[1].trim(), mode: 'insensitive' }, deletedAt: null }
+            });
+            if (matchedLead) targetLeadId = matchedLead.id;
+          }
+        }
+
+        if (!targetLeadId) {
+          // Fallback to the latest active lead in this organization
           const fallbackLead = await prisma.lead.findFirst({
-            where: { organizationId, deletedAt: null }
+            where: { organizationId, deletedAt: null },
+            orderBy: { createdAt: 'desc' }
           });
           if (fallbackLead) targetLeadId = fallbackLead.id;
         }
 
         if (targetLeadId) {
           let title = 'AI Scheduled Follow-up';
-          const titleMatch = message.match(/task\s+to\s+([A-Za-z\s]+?)(?:\s+for|\s+and|$)/i);
+          const titleMatch = message.match(/task\s+(?:to\s+)?([A-Za-z\s]+?)(?:\s+for|\s+and|$)/i);
           if (titleMatch) title = titleMatch[1].trim();
 
           const taskRes = await this.executeCreateTask(organizationId, userId, targetLeadId, {
@@ -156,33 +168,50 @@ export class AIAssistantService {
       }
 
       // Scenario 3: Update Lead Status
-      if (lowerMessage.includes('update status') || lowerMessage.includes('change status')) {
-        const uuidMatch = message.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (/update\s+(?:the\s+)?status|change\s+(?:the\s+)?status|update\s+([A-Za-z\s]+)\s+status/i.test(message)) {
         let status = 'QUALIFIED';
         if (lowerMessage.includes('won')) status = 'WON';
         if (lowerMessage.includes('lost')) status = 'LOST';
         if (lowerMessage.includes('contacted')) status = 'CONTACTED';
 
+        let targetLeadId = currentLeadId;
+        const uuidMatch = message.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
         if (uuidMatch) {
-          const statusRes = await this.executeUpdateLeadStatus(organizationId, uuidMatch[0], status);
+          targetLeadId = uuidMatch[0];
+        } else {
+          // Try to find by lead name mentioned in prompt (e.g. "Update Bruce Wayne status to WON" or "Update status of Bruce Wayne to WON")
+          const nameMatch = message.match(/(?:update\s+status\s+of|update)\s+([A-Za-z\s]+?)(?:\s+status|\s+to|$)/i);
+          if (nameMatch && nameMatch[1].trim().toLowerCase() !== 'status') {
+            const matchedLead = await prisma.lead.findFirst({
+              where: { organizationId, name: { contains: nameMatch[1].trim(), mode: 'insensitive' }, deletedAt: null }
+            });
+            if (matchedLead) targetLeadId = matchedLead.id;
+          }
+        }
+
+        if (targetLeadId) {
+          const statusRes = await this.executeUpdateLeadStatus(organizationId, targetLeadId, status);
           logs.push(statusRes.message);
         } else {
-          logs.push('Skip status update: No lead UUID found in message.');
+          logs.push('Skip status update: No matching lead found.');
         }
       }
 
       // Scenario 4: Add Note
-      if (lowerMessage.includes('add note') || lowerMessage.includes('log note')) {
+      if (/add\s+(?:a\s+)?note|log\s+(?:a\s+)?note/i.test(message)) {
+        let targetLeadId = currentLeadId;
         const uuidMatch = message.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-        let content = 'Default note context added by Assistant';
-        const noteMatch = message.match(/note\s+"([^"]+)"/i);
-        if (noteMatch) content = noteMatch[1];
+        if (uuidMatch) targetLeadId = uuidMatch[0];
 
-        if (uuidMatch) {
-          const noteRes = await this.executeAddNote(organizationId, userId, uuidMatch[0], content);
+        let content = 'Default note context added by Assistant';
+        const noteMatch = message.match(/note\s+[:"']?([^"']+)["']?/i);
+        if (noteMatch) content = noteMatch[1].trim();
+
+        if (targetLeadId) {
+          const noteRes = await this.executeAddNote(organizationId, userId, targetLeadId, content);
           logs.push(noteRes.message);
         } else {
-          logs.push('Skip note creation: No lead UUID found in message.');
+          logs.push('Skip note creation: No matching lead found.');
         }
       }
 

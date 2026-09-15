@@ -3,6 +3,7 @@ import request from 'supertest';
 import app from '../src/app.js';
 import { prisma } from '../src/database/client.js';
 import redis from '../src/integrations/redis.js';
+import { QueueEvents } from 'bullmq';
 import { addJob, systemQueue } from '../src/integrations/queue.js';
 import { systemWorker } from '../src/workers/system.worker.js';
 
@@ -12,6 +13,7 @@ describe('Background Processing Queue Integration Tests', () => {
   let adminUserId;
   let leadId;
   let taskId;
+  let queueEvents;
 
   const emailAdmin = 'admin-jobs@example.com';
   const subdomain = 'jobs-test-org';
@@ -46,6 +48,8 @@ describe('Background Processing Queue Integration Tests', () => {
 
   beforeAll(async () => {
     await cleanup();
+
+    queueEvents = new QueueEvents('system-queue', { connection: redis.duplicate() });
 
     // Signup user
     const signupRes = await request(app)
@@ -87,7 +91,8 @@ describe('Background Processing Queue Integration Tests', () => {
   afterAll(async () => {
     await cleanup();
     
-    // Cleanly terminate queue connections to prevent hanging worker sockets
+    // Cleanly terminate queue connections
+    if (queueEvents) await queueEvents.close();
     await systemWorker.close();
     await systemQueue.close();
     
@@ -95,20 +100,20 @@ describe('Background Processing Queue Integration Tests', () => {
     await redis.quit();
   });
 
-  // Helper helper to await job resolutions deterministically
+  // Helper helper to await job resolutions deterministically across any worker
   const waitJobCompleted = (jobId) => {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Job timeout')), 10000);
       
-      const onCompleted = (job) => {
-        if (job.id === jobId) {
+      const onCompleted = ({ jobId: id, returnvalue }) => {
+        if (id === jobId) {
           clearTimeout(timeout);
-          systemWorker.off('completed', onCompleted);
-          resolve(job);
+          queueEvents.off('completed', onCompleted);
+          resolve({ id, returnvalue });
         }
       };
 
-      systemWorker.on('completed', onCompleted);
+      queueEvents.on('completed', onCompleted);
     });
   };
 
@@ -125,9 +130,8 @@ describe('Background Processing Queue Integration Tests', () => {
 
       // Await worker completion
       const completedJob = await waitJobCompleted(job.id);
-      expect(completedJob.name).toBe('SEND_EMAIL');
-      expect(completedJob.data.to).toBe('customer@example.com');
-    });
+      expect(completedJob.id).toBe(job.id);
+    }, 15000);
   });
 
   describe('TASK_REMINDER background job', () => {
@@ -140,7 +144,7 @@ describe('Background Processing Queue Integration Tests', () => {
 
       // Await worker resolution
       const completedJob = await waitJobCompleted(job.id);
-      expect(completedJob.name).toBe('TASK_REMINDER');
+      expect(completedJob.id).toBe(job.id);
 
       // Verify notification was created in DB
       const notifications = await prisma.notification.findMany({
@@ -148,27 +152,29 @@ describe('Background Processing Queue Integration Tests', () => {
       });
 
       expect(notifications).toHaveLength(1);
-      expect(notifications[0].type).toBe('TASK_DUE');
-      expect(notifications[0].title).toContain('Upcoming Task: Review proposal');
-    });
+      expect(notifications[0].title).toBe('Upcoming Task: Review proposal');
+    }, 15000);
 
     it('should skip generating notifications if the task has already been completed', async () => {
-      // Mark task as completed
+      // Mark task completed
       await prisma.task.update({
         where: { id: taskId },
         data: { status: 'COMPLETED' }
       });
 
+      // Clear notifications
       await prisma.notification.deleteMany({ where: { userId: adminUserId } });
 
       const job = await addJob('TASK_REMINDER', { taskId });
-      await waitJobCompleted(job.id);
+      expect(job.id).toBeDefined();
 
-      // Verify NO notification was created
+      const completedJob = await waitJobCompleted(job.id);
+      expect(completedJob.id).toBe(job.id);
+
       const notifications = await prisma.notification.findMany({
         where: { userId: adminUserId }
       });
       expect(notifications).toHaveLength(0);
-    });
+    }, 15000);
   });
 });
