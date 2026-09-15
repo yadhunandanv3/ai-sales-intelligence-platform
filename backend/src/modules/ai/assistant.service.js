@@ -8,6 +8,31 @@ export class AIAssistantService {
    * Helper: Create a lead with tenant boundaries validated.
    */
   async executeCreateLead(orgId, userId, args) {
+    // Deduplication check: if lead with same name & company already exists, update and reuse it
+    const existing = await prisma.lead.findFirst({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        name: { equals: args.name.trim(), mode: 'insensitive' },
+        ...(args.company ? { company: { equals: args.company.trim(), mode: 'insensitive' } } : {})
+      }
+    });
+
+    if (existing) {
+      const updated = await prisma.lead.update({
+        where: { id: existing.id },
+        data: {
+          ...(args.value ? { value: parseFloat(args.value) } : {}),
+          ...(args.email ? { email: args.email } : {})
+        }
+      });
+      return {
+        success: true,
+        leadId: updated.id,
+        message: `Lead "${updated.name}" already exists in your pipeline. Updated existing lead details (ID: ${updated.id}).`
+      };
+    }
+
     const lead = await prisma.lead.create({
       data: {
         organizationId: orgId,

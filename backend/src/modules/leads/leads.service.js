@@ -1,6 +1,6 @@
 import { LeadsRepository } from './leads.repository.js';
 import { prisma } from '../../database/client.js';
-import { NotFoundError, ValidationError } from '../../common/errors.js';
+import { NotFoundError, ValidationError, ConflictError } from '../../common/errors.js';
 import redis from '../../integrations/redis.js';
 import { integrationsService } from '../integrations/integrations.service.js';
 
@@ -11,6 +11,21 @@ export class LeadsService {
    * Create a new lead.
    */
   async createLead(leadData, organizationId) {
+    // 0. Deduplication check: verify no active lead with same name and company exists in this organization
+    if (leadData.name) {
+      const existing = await prisma.lead.findFirst({
+        where: {
+          organizationId,
+          deletedAt: null,
+          name: { equals: leadData.name.trim(), mode: 'insensitive' },
+          ...(leadData.company ? { company: { equals: leadData.company.trim(), mode: 'insensitive' } } : {})
+        }
+      });
+      if (existing) {
+        throw new ConflictError(`A lead named "${leadData.name}"${leadData.company ? ` from "${leadData.company}"` : ''} already exists in your organization.`);
+      }
+    }
+
     // 1. Verify assignee belongs to organization (if assigned)
     if (leadData.assignedUserId) {
       await this.verifyUserBelongsToOrg(leadData.assignedUserId, organizationId);

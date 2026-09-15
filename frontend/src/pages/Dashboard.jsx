@@ -57,6 +57,17 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeleteLead = async (leadId) => {
+    if (!window.confirm('Are you sure you want to delete this lead?')) return;
+    try {
+      await api.deleteLead(leadId);
+      setSelectedLead(null);
+      fetchLeads();
+    } catch (err) {
+      alert(err.message || 'Failed to delete lead');
+    }
+  };
+
   const handleAIScore = async (leadId) => {
     setAiLoading(true);
     try {
@@ -195,9 +206,17 @@ export default function Dashboard() {
                     <h2 className="text-lg font-bold">{selectedLead.name}</h2>
                     <p className="text-indigo-100 text-xs">{selectedLead.company || 'No Company'}</p>
                   </div>
-                  <button onClick={() => setSelectedLead(null)} className="text-white hover:text-indigo-200">
-                    ✕
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => handleDeleteLead(selectedLead.id)}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded shadow transition"
+                    >
+                      Delete Lead
+                    </button>
+                    <button onClick={() => setSelectedLead(null)} className="text-white hover:text-indigo-200 text-lg font-bold">
+                      ✕
+                    </button>
+                  </div>
                 </div>
 
                 {/* Body */}
